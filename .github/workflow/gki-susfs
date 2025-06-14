@@ -1,0 +1,57 @@
+name: Build GKI + SUSFS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git bc bison flex libssl-dev lz4 ccache curl unzip zip python3 build-essential libelf-dev repo patch nano
+
+    - name: Create working directory
+      run: mkdir gki
+
+    - name: Init GKI repo
+      working-directory: gki
+      run: |
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android12-5.10
+        repo sync -j4
+
+    - name: Inject SukiSU
+      working-directory: gki
+      run: |
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-dev
+
+    - name: Clone & apply SUSFS patch
+      working-directory: gki
+      run: |
+        git clone https://gitlab.com/simonpunk/susfs4ksu/ -b gki-android12-5.10 sus
+        susfs=sus/kernel_patches
+        cp -r $susfs/fs .
+        cp -r $susfs/include .
+        cp $susfs/50_add_susfs_in_gki-android12-5.10.patch .
+        patch -p1 < 50_add_susfs_in_gki-android12-5.10.patch
+
+    - name: Remove line 2 from build.config.gki
+      working-directory: gki/common
+      run: |
+        sed -i '2d' build.config.gki
+        echo 'LOCALVERSION="-Aetherium1.7-KSUNxSUSFS"' >> build.config.gki
+
+    - name: Build kernel
+      working-directory: gki
+      run: |
+        LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+
+    - name: Upload Image to Pixeldrain
+      working-directory: gki
+      run: |
+        curl -u :23c84c82-ce06-4e35-bc1f-69eaa13b9958 \
+        -F file=@out/android12-5.10/common/arch/arm64/boot/Image \
+        https://pixeldrain.com/api/file
